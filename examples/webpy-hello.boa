@@ -1,0 +1,17 @@
+(import web)
+
+(set! urls (:tuple "/(.*)" "hello"))
+
+(class hello ()
+  (def GET (self name)
+    (if (not name) 
+        (set! name "world"))
+    (for c in (xrange (int "10")) 
+         (print "Hello," (+ name "!")))))
+
+(if (= __name__ "__main__") 
+    (web.run urls (globals))
+    (print "eek!"))
+
+(set! h (hello))
+(h.GET "")

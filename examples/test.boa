@@ -1,0 +1,35 @@
+
+(def foo (a b (c 99) (d 101))
+  (print a)
+  (print b)
+  (return (+ c d (+ c d) (+ d 3))))
+
+(for x in (range 10) 
+     (print (range x) (foo (str x) (str x))))
+
+(set! x -2)
+
+(if (+ x 2)
+    (print "x is True" x)
+    (print "x is False" x))
+
+(cond
+  ((+ x 2)
+   (print "x is True *")
+   (print "indeed!"))
+  (x 
+   (print "phew")))
+
+(set! t (:tuple 1 7 "Hello"))
+(print t)
+
+(class hello ()
+  (def GET (self name)
+    (print name)))
+
+(set! h (hello))
+(print h)
+
+(h.GET "Srid")
+(set! h.yo 345)
+(print h.yo)

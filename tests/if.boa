@@ -1,0 +1,20 @@
+(set! var 23)
+
+(if var
+    (print "yes")
+    (print "no"))
+
+(if var
+    (begin
+      (display "foo")
+      (display "bar")))
+
+(cond ((= var 21)
+       (print "**"))
+      ((= var 23)
+       (display "Else")
+       (print "stmt"))
+      ((= var 24)
+       (print "**")))
+
+;; TODO: COND with ELSE

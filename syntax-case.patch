@@ -1,0 +1,356 @@
+=== modified file 'compile.ss'
+--- compile.ss	2007-05-20 14:25:27 +0000
++++ compile.ss	2007-05-30 09:17:20 +0000
+@@ -1,4 +1,5 @@
+ (require (lib "match.ss"))
++(require (lib "stx.ss" "syntax")) ;; provides module-or-top-identifier=? 
+ (require (only (lib "1.ss" "srfi") fold))
+ (require (only (lib "13.ss" "srfi") string-contains))
+ (require "python.ss")
+@@ -35,112 +36,113 @@
+           (string=? (symbol->string s)
+                     sym)))))
+ 
+-(define T
+-  (match-lambda
++(define (T expr)
++  (syntax-case* expr (: + and not = set! :tuple if begin cond for in while break print)
++    module-or-top-identifier=? 
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; MATH operators
+     
+-    (('+ left right)
+-     (@> Add (list (T left) (T right))))
+-    (('+ args ...)
++    ((+ left right)
++     (@>* Add 7 (list (T #'left) (T #'right))))
++    ((+ args ...)
+      ;; fold into multiple forms of (+ A B)
+      ;; eg: (+ a b c d) => (+ (+ (+ a b) c) d)
+      (T (fold (lambda (a b) `(+ ,b ,a))
+-              (car args)
+-              (cdr args))))
++              (car (syntax->list #'(args ...)))
++              (cdr (syntax->list #'(args ...))))))
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; BOOLEAN operators
+     
+-    (('and nodes ...)
+-     (@> And : (map T nodes)))
+-    (('not node)
+-     (@> Not (T node)))
++    ((and nodes ...)
++     (@> And : (map T (syntax->list #'(nodes ...)))))
++    ((not node)
++     (@> Not (T #'node)))
+     
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; COMPARISON operators
+     
+-    (('= first rest ...)
++    ((= first rest ...)
+      (@> Compare 
+-         (T first)
++         (T #'first)
+          (map (lambda (r)
+-                (py/tuple (list (ss->py "==") (T r))))
+-              rest)))
++                (py/tuple (list (ss->py "==") (T (syntax->list #'r)))))
++              (syntax->list #'(rest ...)))))
+     
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; Variable ASSIGNMENT
+     
+-    (('set! (targets ...) value)
++    ((set! (targets ...) value)
+      (@> Assign
+          (list (@> AssTuple
+                    (map (lambda (t)
+                           (unpack-assign-name t))
+-                        targets)))
+-         (T value)))
++                        (syntax->list #'(targets ...)))))
++         (T #'value)))
+     
+-    (('set! target value)
++    ((set! target value)
+      (@> Assign 
+-         (list (unpack-assign-name target))
+-         (T value)))
++         (list (unpack-assign-name (syntax-object->datum #'target)))
++         (T #'value)))
+     
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; TUPLE, LIST, DICT
+     
+-    ((':tuple items ...)
+-     (@> Tuple (map T items)))
++    ((:tuple items ...)
++     (@> Tuple (map T (syntax->list #'(items ...)))))
+     
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; IF, COND
+     
+     ;;;; (if <exp> (begin ...) else (begin ...)
+-    (('if exp ('begin body1 ...) ('begin body2 ...))
+-     (@> If
+-         (list (py/tuple (list (T exp) (@> Stmt (map T body1)))))
+-         (@> Stmt (map T body2))))
+-    
+-    (('if exp ('begin body1 ...))
+-     (@> If
+-         (list (py/tuple (list (T exp) (@> Stmt (map T body1)))))
+-         py/none))
+-    
+-    (('if exp body1 body2)
+-     (T `(if ,exp (begin ,body1) (begin ,body2))))
+-    
+-    (('if exp body1)
+-     (@> If
+-         (list (py/tuple (list (T exp) (@> Stmt (list (T body1))))))
+-         py/none))
+-    
+-    (('cond ((and exp (? (not-symbol "else"))) body ...) ...)
+-     (@> If
+-         (map (lambda (e b)
+-                (py/tuple (list (T e) (@> Stmt (map T b)))))
+-              exp body)
+-         py/none))
++    ((if exp (begin body1 ...) (begin body2 ...))
++     (@> If
++         (list (py/tuple (list (T #'exp) (@> Stmt (map T (syntax->list #'(body1 ...)))))))
++         (@> Stmt (map T (syntax->list #'(body2 ...))))))
++    
++    ((if exp (begin body1 ...))
++     (@> If
++         (list (py/tuple (list (T #'exp) (@> Stmt (map T (syntax->list #'(body1 ...)))))))
++         py/none))
++    
++    ;((if exp body1 body2)
++    ; (T `(if ,exp (begin ,body1) (begin ,body2))))
++    
++    ((if exp body1 ...)
++     (@> If
++         (list (py/tuple (list (T #'exp) (@> Stmt (list (T (syntax->list #'(body1 ...))))))))
++         py/none))
++    
++;    ((cond ((and exp (? (not-symbol "else"))) body ...) ...)
++;     (@> If
++;         (map (lambda (e b)
++;                (py/tuple (list (T #'e) (@> Stmt (map T (syntax->list #'(b ...)))))))
++;              exp body)
++;         py/none))
+     ; TODO: else
+     
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; LOOP constructs
+     
+-    (('for var 'in seq suite ...)
++    ((for var in seq suite ...)
+      (@> For
+-         (@> AssName var "OP_ASSIGN")
+-         (T seq)
+-         (@> Stmt (map T suite))
++         (@> AssName (syntax-object->datum #'var) "OP_ASSIGN")
++         (T #'seq)
++         (@> Stmt (map T (syntax->list #'(suite ...))))
+          py/none))
+     
+-    (('while cond body ...)
++    ((while cond body ...)
+      (@> While
+-         (T cond)
+-         (@> Stmt (map T body))
++         (T #'cond)
++         (@> Stmt (map T (syntax->list #'(body ...))))
+          py/none))                    ;; TODO: else
+     
+-    (('break)
++    ((break)
+      (@> Break))
+     
+     
+@@ -148,33 +150,34 @@
+     ;; FUNCTION definition
+     
+     (('def name (args ...) body ...)
+-     (display args)(newline)
+-     (call-with-values 
+-      (lambda () (match-function-args args))
+-      (lambda (args defaults flag)
+-        (let ((ast 
+-               (@> Function
+-                   py/none
+-                   name
+-                   (map ss->py args) ;; XXX: @> macro does not do
+-		                     ;; a deep translation of types
+-                   (map T defaults)          
+-                   flag              ;; TODO: flags
+-                   py/none           ;; TODO: doc string
+-                   (@> Stmt (map T body)))))
+-          (filename-hack! ast)
+-          ast))))
++     (begin
++       ;(display #'args)(newline)
++       (call-with-values 
++        (lambda () (match-function-args (syntax->list #'(args ...))))
++        (lambda (args defaults flag)
++          (let ((ast 
++                 (@> Function
++                     py/none
++                     #'name
++                     (map ss->py args) ;; XXX: @> macro does not do
++                     ;; a deep translation of types
++                     (map T defaults)          
++                     flag              ;; TODO: flags
++                     py/none           ;; TODO: doc string
++                     (@> Stmt (map T (syntax->list #'(body ...)))))))
++            (filename-hack! ast)
++            ast)))))
+     
+     (('return exp)
+-     (@> Return (T exp)))
++     (@> Return (T #'exp)))
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; CLASS definition
+     
+     (('class name (bases ...) statements ...)
+      (let ((class (@> Class
+-		      name bases "DOCSTRING"
+-		      (@> Stmt (map T statements)))))
++		      #'name (syntax->list #'(bases ...)) "DOCSTRING"
++		      (@> Stmt (map T (syntax->list #'(statements ...)))))))
+        (filename-hack! class)
+        class))
+     
+@@ -183,38 +186,40 @@
+     ;; PRINT, IMPORT, ....
+     
+     ;;;; (print x)
+-    (('print exps ...) ;; ???
+-     (@> Printnl (map T exps) py/none))
++    ((print exps ...) ;; ???
++     (display (syntax-line #'(exps ...)))
++     (@>* Printnl (syntax-line #'print) (map T (syntax->list #'(exps ...))) py/none))
+     
+     ;; >>> print e1, e2,
+-    (('display exps ...)
+-     (@> Print (map T exps) py/none))
++    ((display exps ...)
++     (@> Print (map T (syntax->list #'(exps ...))) py/none))
+     
+     ;;;; (import name1 name2 ...)
+-    (('import names ...)
++    ((import names ...)
+      (@> Import (map (lambda (n)
+                        (py/tuple (list (ss->py n) py/none)))
+-                     names)))
++                     (syntax->list #'(names ...)))))
+     
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; APPLY
+     
+     ((proc args ...)
+-     (@> CallFunc (T proc) (map T args) 
++     (@> CallFunc (T #'proc) (map T (syntax->list #'(args ...))) 
+          py/none py/none))               ;; TODO: *args, **kwargs
+-   
++    
+     
+     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     ;; CONSTANTS, VARIABLES
+     
+     ;;;; a token -- var, 23, "foobar", 634.34
+     (name
+-     (cond 
+-       ((symbol? name) (unpack-name name))
+-       ((number? name) (@> Const name))
+-       ((string? name) (@> Const name))
+-       (else (error "invalid exp" name))))))
++     (let ((nam (syntax-object->datum #'name)))
++       (cond 
++         ((symbol? nam) (unpack-name nam))
++         ((number? nam) (@>* Const 7 nam))
++         ((string? nam) (@>* Const 7 nam))
++         (else (error "invalid exp" nam)))))))
+ 
+ ;; These functions handle names of the forms,
+ ;;  - foo.bar.baz
+@@ -240,8 +245,8 @@
+                (lname  (last names*)))
+           (@> AssAttr 
+               (fold (lambda (a b) (@> Getattr b a))
+-                            (T (string->symbol (car names)))
+-                            (cdr names))
++                    (T (string->symbol (car names)))
++                    (cdr names))
+               lname
+               "OP_ASSIGN"))
+         (@> AssName name "OP_ASSIGN"))))
+@@ -298,7 +303,7 @@
+                               "st_mtime")))))
+       (map (lambda (n)
+              (@ (: f 'write)
+-                (@ (: "__builtin__" 'chr) n)))
++                (@ (: "__builtin__" 'chr) n) ))
+            (map (lambda (n)
+                   (bitwise-and (arithmetic-shift ts (- n)) #xff))
+                 (list 0 8 16 24))))
+@@ -307,7 +312,7 @@
+     (@ (: f 'close))))
+ 
+ (define (read-sexp fileh)
+-  (let ((sexp (read fileh)))
++  (let ((sexp (read-syntax "d:\\Code\\boalisp\\lineno.boa" fileh)))
+     (if (eof-object? sexp)
+         (list)
+         (cons sexp (read-sexp fileh)))))
+@@ -323,6 +328,7 @@
+   (set! *filename-hack* filename)
+   (call-with-input-file filename
+     (lambda (i)
++      (port-count-lines! i)
+       (let* ((ast (@> Module "<DOCSTRING>" (@> Stmt (map T (read-sexp i)))))
+              (_   (filename-hack! ast))
+              (c   (@ (: "compiler" 'pycodegen 'InteractiveCodeGenerator) ast))
+
+=== modified file 'examples/test.boa'
+--- examples/test.boa	2007-05-18 11:20:08 +0000
++++ examples/test.boa	2007-05-24 04:58:08 +0000
+@@ -1,6 +1,6 @@
+ 
+ (def foo (a b (c 99) (d 101))
+-  (print a)
++  (print a3)
+   (print b)
+   (return (+ c d (+ c d) (+ d 3))))
+ 
+
+=== modified file 'python.ss'
+--- python.ss	2007-05-18 11:20:08 +0000
++++ python.ss	2007-05-29 20:11:30 +0000
+@@ -188,4 +188,14 @@
+       ((_ node c1 ...)
+        (@> node : (list c1 ...)))))
+   
++  (define-syntax @>*
++    (syntax-rules (:)
++      ((_ node lineno : c-list)
++       (let ((a (apply (ast (symbol->string 'node))
++                       (map ss->py c-list))))
++         (py/setattr a "lineno" (py/int lineno))
++         a))
++      ((_ node lineno c1 ...)
++       (@>* node lineno : (list c1 ...)))))
++
+   'ok)
+\ No newline at end of file
+
